@@ -27,8 +27,12 @@ function Auth() {
   async function submit(e) {
     e.preventDefault();
     setError("");
-    setBusy(true);
     const { email, password, name, code } = form;
+    if (mode === "signup" && !name.trim()) {
+      setError("Please enter your name — it's what the family sees on your ideas.");
+      return;
+    }
+    setBusy(true);
     const res =
       mode === "login"
         ? await supabase.auth.signInWithPassword({ email, password })
@@ -40,7 +44,7 @@ function Auth() {
     setBusy(false);
     if (res.error) {
       const msg = res.error.message;
-      setError(/database error/i.test(msg) ? "Wrong invite code, or the trip is already full (10 members)." : msg);
+      setError(/database error/i.test(msg) ? "Couldn't join: check the invite code with the trip organiser (or the trip may already have 10 members)." : msg);
     }
   }
 
@@ -56,7 +60,7 @@ function Auth() {
         {mode === "signup" && (
           <>
             <label>Your name</label>
-            <input required value={form.name} onChange={set("name")} placeholder="e.g. Auntie May" />
+            <input required maxLength={40} value={form.name} onChange={set("name")} placeholder="e.g. Auntie May" />
             <label>Invite code (ask the trip organiser)</label>
             <input required value={form.code} onChange={set("code")} />
           </>
@@ -74,6 +78,17 @@ function Auth() {
 
 /* ---------- The board ---------- */
 const CATS = ["All", "Eat", "Go", "Do"];
+
+// Only http(s) links are shown; display the hostname so people can see where a link goes.
+function safeHost(link) {
+  if (!link) return null;
+  try {
+    const u = new URL(link);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.hostname : null;
+  } catch {
+    return null;
+  }
+}
 const EMPTY = { title: "", category: "Eat", note: "", link: "", trip_day: "" };
 
 function Board({ user }) {
@@ -103,6 +118,13 @@ function Board({ user }) {
     load();
   }
 
+  async function leaveTrip() {
+    if (!confirm("Leave the trip? This permanently deletes your account, all your ideas and your votes.")) return;
+    const { error } = await supabase.rpc("leave_trip");
+    if (error) return setError(error.message);
+    await supabase.auth.signOut();
+  }
+
   async function remove(idea) {
     if (!confirm(`Delete "${idea.title}"?`)) return;
     const { error } = await supabase.from("ideas").delete().eq("id", idea.id);
@@ -123,7 +145,10 @@ function Board({ user }) {
     <main>
       <div className="top">
         <h1>🧳 {TRIP_NAME}</h1>
-        <button className="link" onClick={() => supabase.auth.signOut()}>Log out</button>
+        <span style={{ flex: "none" }}>
+          <button className="link" onClick={() => supabase.auth.signOut()}>Log out</button>
+          <button className="link danger" onClick={leaveTrip}>Leave trip</button>
+        </span>
       </div>
       <p className="muted">Add ideas, tap “I’m in” on the ones you want. Most-wanted rises to the top.</p>
 
@@ -165,7 +190,13 @@ function Board({ user }) {
             </div>
             <h3>{idea.title}</h3>
             {idea.note && <p>{idea.note}</p>}
-            {idea.link && <p><a href={idea.link} target="_blank" rel="noreferrer">{idea.link}</a></p>}
+            {safeHost(idea.link) && (
+              <p>
+                <a href={idea.link} target="_blank" rel="noopener noreferrer" title={idea.link}>
+                  🔗 {safeHost(idea.link)}
+                </a>
+              </p>
+            )}
             <div className="row" style={{ justifyContent: "space-between" }}>
               <span className="muted">by {idea.author?.display_name ?? "someone"}</span>
               {mine && (
@@ -220,9 +251,9 @@ function IdeaForm({ idea, onDone }) {
         </div>
       </div>
       <label>Note (optional)</label>
-      <textarea value={f.note} onChange={set("note")} placeholder="Why go? Opening hours? Must-order?" />
+      <textarea maxLength={2000} value={f.note} onChange={set("note")} placeholder="Why go? Opening hours? Must-order?" />
       <label>Link (optional — Maps, TikTok, blog)</label>
-      <input type="url" value={f.link} onChange={set("link")} placeholder="https://" />
+      <input type="url" maxLength={2048} pattern="https?://.+" title="Must start with http:// or https://" value={f.link} onChange={set("link")} placeholder="https://" />
       {error && <p className="error">{error}</p>}
       <p className="row" style={{ justifyContent: "flex-end" }}>
         <button type="button" style={{ flex: "none" }} onClick={onDone}>Cancel</button>

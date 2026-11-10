@@ -1,4 +1,15 @@
--- Family Trip 2026 — run this once in Supabase → SQL Editor.
+-- Family Trip 2026 — run this once in Supabase → SQL Editor on a NEW project.
+-- (Existing project created from the original schema? Run migrations/001_security_privacy.sql instead.)
+
+-- 0. Private settings (not exposed through the API). Holds the invite code.
+create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+
+create table private.settings (
+  key   text primary key,
+  value text not null
+);
+revoke all on private.settings from public, anon, authenticated;
 
 -- 1. Members (one row per signed-up family member)
 create table public.profiles (
@@ -7,19 +18,33 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 
--- Sign-up gate: correct invite code AND max 10 members.
+-- Sign-up gate: secret invite code + required display name + max 10 members.
 -- Runs inside the database, so it can't be bypassed from the browser.
+-- The advisory lock serialises sign-ups so parallel requests can't exceed the cap.
 create or replace function public.handle_new_user()
-returns trigger language plpgsql security definer set search_path = public as $$
+returns trigger language plpgsql security definer set search_path = public, private as $$
+declare
+  v_expected text;
+  v_name     text := btrim(coalesce(new.raw_user_meta_data->>'display_name', ''));
 begin
-  if coalesce(new.raw_user_meta_data->>'invite_code', '') <> 'FAMILY10' then
+  perform pg_advisory_xact_lock(hashtext('family_trip_signup'));
+
+  select value into v_expected from private.settings where key = 'invite_code';
+  if v_expected is null
+     or upper(btrim(coalesce(new.raw_user_meta_data->>'invite_code', ''))) <> upper(btrim(v_expected)) then
     raise exception 'Wrong invite code';
   end if;
+
+  -- Never fall back to the email address as a public name.
+  if v_name = '' or char_length(v_name) > 40 then
+    raise exception 'Display name is required (max 40 characters)';
+  end if;
+
   if (select count(*) from public.profiles) >= 10 then
     raise exception 'This trip is full (max 10 members)';
   end if;
-  insert into public.profiles (id, display_name)
-  values (new.id, coalesce(nullif(new.raw_user_meta_data->>'display_name', ''), split_part(new.email, '@', 1)));
+
+  insert into public.profiles (id, display_name) values (new.id, v_name);
   return new;
 end $$;
 
@@ -32,8 +57,9 @@ create table public.ideas (
   id bigint generated always as identity primary key,
   title text not null check (char_length(title) between 1 and 120),
   category text not null check (category in ('Eat', 'Go', 'Do')),
-  note text,
-  link text,
+  note text constraint note_len check (note is null or char_length(note) <= 2000),
+  link text constraint link_is_http check (link is null or link ~* '^https?://[^\s]+$')
+            constraint link_len     check (link is null or char_length(link) <= 2048),
   trip_day int check (trip_day between 1 and 60),
   author_id uuid not null default auth.uid() references public.profiles on delete cascade,
   created_at timestamptz not null default now()
@@ -61,3 +87,19 @@ create policy "author deletes idea"   on public.ideas for delete to authenticate
 create policy "members read votes"    on public.votes for select to authenticated using (true);
 create policy "vote as yourself"      on public.votes for insert to authenticated with check (user_id = auth.uid());
 create policy "unvote yourself"       on public.votes for delete to authenticated using (user_id = auth.uid());
+
+-- 5. Leave the trip: a member deletes their own account.
+--    Cascades remove their profile, ideas and votes.
+create or replace function public.leave_trip()
+returns void language sql security definer set search_path = '' as $$
+  delete from auth.users where id = auth.uid();
+$$;
+revoke all on function public.leave_trip() from public, anon;
+grant execute on function public.leave_trip() to authenticated;
+
+-- 6. Set your invite code. Run separately with your own code; do NOT commit it.
+--
+--   insert into private.settings (key, value) values ('invite_code', 'YOUR-SECRET-CODE')
+--   on conflict (key) do update set value = excluded.value;
+--
+-- Until this is set, every sign-up is refused.
