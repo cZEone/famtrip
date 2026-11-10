@@ -2,6 +2,8 @@
 
 A small Reddit/Pinterest-style board for **one family holiday**. Up to 10 relatives post ideas for places to **eat, go and do**, then tap **"I'm in"** on the ones they want. The most-wanted ideas rise to the top.
 
+▶️ **[Watch the 45-second demo](docs/famtrip-demo.webm)**: logging in, posting ideas, voting, filtering, editing, and a second member who can vote but can't edit someone else's idea.
+
 ## Product thinking
 
 | | |
