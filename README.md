@@ -75,6 +75,15 @@ npm run test:coverage   # run with coverage (fails under 80% lines)
 
 The tests use Node's built-in test runner and a fake Supabase client (`tests/fakeSupabase.mjs`), so they need no network, database or extra packages.
 
+### Linting and the Claude Code hook
+
+```
+npm run lint    # ESLint (Next.js recommended rules + a few bug-catching extras)
+npm run check   # lint + tests with the 80% coverage gate
+```
+
+`.claude/settings.json` registers a **Claude Code hook**: after Claude edits or writes a JS/MJS file, `.claude/hooks/check.mjs` lints that file. If the file is under `lib/api/` or `tests/`, the hook also runs the tests. Any problem is sent back to Claude, which has to fix it before carrying on. Non-JS files are skipped. To turn the hook off, delete the `PostToolUse` entry from that file.
+
 ## Security and privacy
 
 - **Invite code:** stored only in `private.settings`, which the API can't reach. Share it privately and change it with the query above if it leaks.
