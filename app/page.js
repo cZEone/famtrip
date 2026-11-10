@@ -91,6 +91,22 @@ function safeHost(link) {
 }
 const EMPTY = { title: "", category: "Eat", note: "", link: "", trip_day: "" };
 
+// Call our own API routes (app/api/...) with the logged-in user's token.
+// Returns { data, error } like supabase-js does, so the UI code stays simple.
+async function api(path, { method = "GET", body } = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${session?.access_token ?? ""}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const payload = res.status === 204 ? null : await res.json().catch(() => null);
+  return res.ok ? { data: payload, error: null } : { data: null, error: { message: payload?.error ?? `HTTP ${res.status}` } };
+}
+
 function Board({ user }) {
   const [ideas, setIdeas] = useState([]);
   const [filter, setFilter] = useState("All");
@@ -99,10 +115,7 @@ function Board({ user }) {
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("ideas")
-      .select("*, author:profiles!ideas_author_id_fkey(display_name), votes(user_id)")
-      .order("created_at", { ascending: false });
+    const { data, error } = await api("/ideas");
     if (error) setError(error.message);
     else setIdeas(data);
   }, []);
@@ -112,8 +125,8 @@ function Board({ user }) {
   async function toggleVote(idea) {
     const mine = idea.votes.some((v) => v.user_id === user.id);
     const { error } = mine
-      ? await supabase.from("votes").delete().match({ idea_id: idea.id, user_id: user.id })
-      : await supabase.from("votes").insert({ idea_id: idea.id });
+      ? await api(`/ideas/${idea.id}/vote`, { method: "DELETE" })
+      : await api(`/ideas/${idea.id}/vote`, { method: "POST" });
     if (error) setError(error.message);
     load();
   }
@@ -127,7 +140,7 @@ function Board({ user }) {
 
   async function remove(idea) {
     if (!confirm(`Delete "${idea.title}"?`)) return;
-    const { error } = await supabase.from("ideas").delete().eq("id", idea.id);
+    const { error } = await api(`/ideas/${idea.id}`, { method: "DELETE" });
     if (error) setError(error.message);
     load();
   }
@@ -228,8 +241,8 @@ function IdeaForm({ idea, onDone }) {
       trip_day: f.trip_day === "" ? null : Number(f.trip_day),
     };
     const { error } = idea
-      ? await supabase.from("ideas").update(row).eq("id", idea.id)
-      : await supabase.from("ideas").insert(row);
+      ? await api(`/ideas/${idea.id}`, { method: "PATCH", body: row })
+      : await api("/ideas", { method: "POST", body: row });
     if (error) setError(error.message);
     else onDone();
   }
