@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --test \"tests/**/*.test.mjs\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"lib/api/**\" --test-coverage-exclude=\"lib/api/server.mjs\" --test-coverage-lines=80 \"tests/**/*.test.mjs\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

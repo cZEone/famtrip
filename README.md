@@ -45,6 +45,34 @@ Out of scope for v1: photos, comments, itinerary scheduling, expense splitting.
 5. Run `npm install`, then `npm run dev`, and open http://localhost:3000
 6. Deploy by importing the repo into Vercel and adding the same two environment variables.
 
+## API routes
+
+The board talks to its own API (Next.js route handlers on Vercel), and the API talks to Supabase **as the logged-in user**, so the database rules still apply.
+
+| Method | Route | What it does |
+|---|---|---|
+| GET | `/api/ideas` | List ideas, with author name and votes |
+| POST | `/api/ideas` | Create an idea (validated) → 201 |
+| PATCH | `/api/ideas/:id` | Edit your own idea; someone else's → 404 |
+| DELETE | `/api/ideas/:id` | Delete your own idea → 204 |
+| POST | `/api/ideas/:id/vote` | "I'm in" (voting twice is harmless) |
+| DELETE | `/api/ideas/:id/vote` | Take back your vote → 204 |
+
+Every route needs `Authorization: Bearer <access token>`, or it returns 401.
+
+- Route files: `app/api/**/route.js`. These are thin wiring only.
+- Logic: `lib/api/handlers.mjs`.
+- Validation: `lib/api/validate.mjs`.
+
+### Tests
+
+```
+npm test                # run tests
+npm run test:coverage   # run with coverage (fails under 80% lines)
+```
+
+The tests use Node's built-in test runner and a fake Supabase client (`tests/fakeSupabase.mjs`), so they need no network, database or extra packages.
+
 ## Security and privacy
 
 - **Invite code:** stored only in `private.settings`, which the API can't reach. Share it privately and change it with the query above if it leaks.
